@@ -1,0 +1,356 @@
+% !TeX root = ../main.tex
+
+\chapter{前置定义}
+
+程序的上界（upper bound）是一种抽象的模型，目的是对程序在真实环境下的实际执行时间和效率进行近似。正如在第\ref{section:chap1-bound-analysis-intro}节中指出的那样，最坏情况执行时间（WCET）这一指标受到诸多因素的影响，难以事先确定并进行分析。为此，需要一种在形式上准确可行的方法，以便于较为准确地预测从而改进程序的性能。
+
+在计算理论中，通常使用图灵机执行的最大长度或者移动的最大距离等作为这种抽象的模型。这是一种可行但过于底层的做法，实际的程序中有着各式复杂的结构，需要更加高层次的表示。
+
+本篇论文为避免涉及实际编程语言的诸多细节，简化表示和方便陈述，构建了一个简单的命令式语言\tmtextbf{Imp}。其特点是单例程，变量都为整型，且只含有简单表达式\footnote{指表达式在求值时无副作用（side-effects）}。此章下文将详细地对其进行描述，并给出程序、循环、上界等概念的形式化定义。下一章节将在此基础上给出主要的算法。第四章将描述如何将其应用在C语言程序的验证之中。
+
+\section{表达式与语句}
+
+这一节定义了工作语言\tmtextbf{Imp}的若干构件的语法和语义。首先给出表达式的语法的定义：
+
+\begin{definition}
+  $Var$是一组程序变量的集合，其中$x \in \tmop{Var}$代表整型变量。
+\end{definition}
+
+\begin{definition}
+  \label{def:chap2-arith-expr}
+  
+  A是由变量和整型常量构成的算数表达式的集合。算数表达式由下列规则定义：
+  
+  \[ 
+  a := x \mid i \mid a \mathbin{\mathbf{op}} a \mid - a 
+  \]
+     
+  其中$x \in \tmop{Var}, i \in \mathbb{Z},  \mathbf{op} \in \{ +, -, \times, / \}$，其语义为标准语义。
+\end{definition}
+
+\begin{definition}
+  设$\bot$代表假值，$\top$代表真值。B是由变量和整型常量构成的布尔表达式的集合。布尔表达式由下列规则定义：
+  \[ b := a \mathbin{\mathbf{cop}} a \mid b \mathbin{\mathbf{bop}} b
+     \mid \neg b \mid \bot \mid \top \]
+  其中$a \in A, \mathbf{cop} \in \{ >, <, \geqslant, \leqslant,
+  =, \neq \}, \mathbf{bop} \in \{ \wedge, \vee, \rightarrow
+  \}$，其语义为标准语义。
+\end{definition}
+
+表达式的求值是在一定的状态中进行的，状态（memory state）代表了在程序执行的某个瞬间，程序中各变量的值：
+
+\begin{definition}
+  程序的状态是一个将变量映射为整型值的函数，即$s \in \tmop{Var} \rightarrow \mathbb{Z}$。S是状态的集合。将状态s在变量x上的值更新为$a \in \mathbb{Z}$，记为$s [x / a]$，定义如下：
+  
+  \[ s [x / a] (y) = \left\{ \begin{array}{cc}
+       s (y) & x \neq y\\
+       a & x = y
+     \end{array} \right. \]
+     
+\end{definition}
+
+给定表达式和当前状态，可以递归地计算出表达式在当前状态下的值：
+
+\begin{definition}
+  算数表达式$a \in A$在状态s中的值是$\mathbb{Z}$中的元素，写作s(a)，由下列规则定义：
+  
+  \[ s (a) = \left\{ \begin{array}{ll}
+       s (x) & a = x\\
+       i & a = i\\
+       s (a_1)  \mathbin{\mathbf{op}} s (a_2) & a = a_1  \mathbin{\mathbf{op}} a_2\\
+       - s (a_1) & a = - a_1
+     \end{array} \right. \]
+\end{definition}
+
+\begin{definition}
+  布尔表达式$b \in B$在状态s中的值是$\{ \bot, \top
+  \}$中的元素，写作s(b)，由下列规则定义：
+  \[ s (b) = \left\{ \begin{array}{ll}
+       s (a_1)  \mathbin{\mathbf{cop}} s (a_2) & b = a_1  \mathbin{\mathbf{cop}} a_2\\
+       s (b_1)  \mathbin{\mathbf{bop}} s (b_2) & b = b_1  \mathbin{\mathbf{bop}} b_2\\
+       \neg s (b_1)  & b = \neg b_1\\
+       b & b = \bot \, \mathrm{or} \, \top
+     \end{array} \right. \]
+\end{definition}
+
+命令式程序由一条条的语句（statement）组成，语句是对程序状态进行改变的操作，不同的语句具有不同的效果。我们考虑如下的语句集合：
+
+\begin{definition}
+  语句集Stmt是全体语句stmt的集合。语句由下列规则定义：
+  \[ \tmop{stmt} := \mathbf{\tmop{skip}} \mid x = a \mid
+     \mathbf{havoc} \, x \, \mid \mathbf{assume} \,b \, \mid
+     \tmop{stmt} \mathbf{;} \tmop{stmt} \]
+  其中，$x \in \tmop{Var}, a \in A, b \in B$。这五种语句也非形式化地称为空语句、赋值语句、非确定型赋值语句、假设断言语句和语句复合。
+\end{definition}
+
+\begin{definition}
+  \label{def:chap2-semantics}
+  语句stmt可视为状态集S上的一个关系，对任意两个状态$s_1$和$s_2$，用$\{ s_1 \} \tmop{stmt} \{ s_2 \}$表示$(s_1, s_2) \in \tmop{stmt}$。此关系可由如下的推导规则（inference rule）\footnote{推导规则由前件和后件构成，满足前件的条件，即可推导出后件。由推导规则导引出的关系包含能从这些规则中推导出的元素对，且只包含这些元素对。}定义：
+  
+  \[ \begin{array}{c}
+       \frac{}{\{ s \} \mathbf{\tmop{skip}} \{ s \}}\\
+       \\
+       \frac{v = s (a)}{\{ s \} x = a \{ s [x / v] \}}\\
+       \\
+       \frac{v \in \mathbb{Z}}{\{ s \} \mathbf{havoc} \, x \, \{ s [x / v]
+       \}}\\
+       \\
+       \frac{s (b) = \top}{\{ s \} \mathbf{assume} \,b \, \{ s \}}\\
+       \\
+       \frac{\{ s_1 \} \tmop{stmt}_1 \{ s_2 \} \quad \{ s_2 \} \tmop{stmt}_2
+       \{ s_3 \}}{\{ s_1 \} \tmop{stmt}_1 \mathbf{;} \tmop{stmt}_2 \{ s_3
+       \}}
+     \end{array} \]
+\end{definition}
+
+\section{程序的表示}
+
+相比于具体的语法，程序的抽象执行模型更便于刻画其语义，因此在上述的语法定义中，并没有引入命令式语言常见的控制流语句。这一节将给出程序的控制流图（Control
+Flow Graph,
+CFG）表示，通过CFG可以实现在较为高级的层面对程序进行分析，但可以避免诸多高级特性的干扰。这类似于一种中间表示（intermediate
+representation，
+IR），但主要用于理论分析，实际程序可以经过若干编译步骤转化为类似的表示。
+
+\begin{definition}
+  \label{def:chap2-program}
+  一个程序P是五元组$(L, \tau, l_0, \tmop{Var},
+  \tmop{Var}_{\tmop{in}})$，其中Var是P中的变量集合，$\tmop{Var}_{\tmop{in}}$是P的输入参数集合（且$\tmop{Var}_{\tmop{in}}
+  \subseteq
+  \tmop{Var}$），L是一组位置的集合，$l_0$是初始位置，$\tau
+  \subseteq L \times \tmop{Stmt} \times L$是变迁关系。
+  
+  我们假定对P中任意的变迁边$(l, \tmop{stmt}, l') \in
+  \tau$，stmt中都不存在对$\tmop{Var}_{\tmop{in}}$中变量的赋值。
+\end{definition}
+
+图\ref{fig:chap2-cfg-example}中给出了一个简单的示例。\tmtextbf{Imp}程序可以视为真实程序中的一个非递归的函数，$\tmop{Var}_{\tmop{in}}$代表其输入的形式参数，而$\tmop{Var}
+\backslash
+\tmop{Var}_{\tmop{in}}$则代表其中的局部变量。这种划分主要是因为上界应该仅由输入参数构成（详见后）。关于定义中的假定需要一些说明：显然程序可能对Var中的任意变量赋值，包括$\tmop{Var}_{\tmop{in}}$中的输入参数。为了确保上界中的参数指向的是程序执行开始时的值，我们可以限定程序处于静态单赋值形式（Static
+Single Assignment Form,
+SSA）。SSA是进行程序分析时一种常见的简化程序的方法，但引入$\phi$函数将影响后续的算法。实际上，我们只需确保输入参数不会被重赋值，而任意程序都可以通过一种简单的程序变换方法，使其满足定义\ref{def:chap2-program}的要求，即在程序入口处将$\tmop{Var}_{\tmop{in}}$中的参数复制一份，并将所有对$\tmop{Var}_{\tmop{in}}$中参数的赋值替换为对复制得到的变量的赋值。按照上界的定义（见下）可知，这一变换不会更改上界。因此，我们可以合理地假设输入参数不会被修改。
+
+\begin{figure}
+  \begin{subfigure}[b]{.5\linewidth}
+    \begin{minted}{c}
+        void func(int a) {
+            int i = a;
+            while(i > 0) {
+                i--;
+            }
+        }
+    \end{minted}
+    \caption{一个简单的C函数}
+  \end{subfigure}
+  \begin{subfigure}[b]{.5\linewidth}
+    \centering
+    \begin{tikzpicture}
+        \node[state, initial] (q1) {$l_{init}$};
+        \node[state, right of=q1] (q2) {$l_1$};
+        \node[state, right of=q2] (q3) {$l_2$};
+        \node[state, below left of=q2] (q4) {$l_3$};
+        \draw (q1) edge[above] node{$i = a$} (q2)
+        (q2) edge[bend left, above] node{$\mathbf{assume} \, i > 0$} (q3)
+        (q3) edge[bend left, below] node{$i = i - 1$} (q2)
+        (q2) edge[bend left, above] node{$\mathbf{assume}\, i \leq 0$} (q4);
+    \end{tikzpicture}
+    \caption{CFG表示}
+  \end{subfigure}
+  \caption{程序的CFG表示示例}
+  \label{fig:chap2-cfg-example}
+\end{figure}
+
+下面的定义则描述了程序的一次执行是如何组成的：
+
+\begin{definition}
+  程序$P = (L, \tau, l_0, \tmop{Var},
+  \tmop{Var}_{\tmop{in}})$的格局（configuration）c是$L \times
+  S$中的元素，用$(l,
+  s)$表示。直观地，l是程序计数器（PC）当前的位置，而s刻画了程序中变量当前的值。
+\end{definition}
+
+\begin{definition}
+  程序的一次执行（run）r是格局的一条最大序列$(l_0, s_0)
+  \rightarrow (l_1, s_1) \rightarrow
+  \cdots$，其中$l_0$是初始位置，且满足$\forall i \in \mathbb{N},
+  \exists (l_i, \tmop{stmt}, l_{i + 1}) \in \tau, \{ s_i \} \tmop{stmt} \{
+  s_{i + 1} \}$。
+  
+  如果r是有限的，称其为终止（terminating）的执行；否则，称为非终止（nonterminating）的执行。
+  
+  其中，“最大序列”指的是：若r是终止的执行，$(l_{\tmop{end}},
+  s_{\tmop{end}})$是序列中的最后的格局，则应满足不存在转移$(l_{\tmop{end}},
+  \tmop{stmt}, l') \in \tau$和状态$s'$，使得$\{ s_{\tmop{end}} \}
+  \tmop{stmt} \{ s' \}$。
+\end{definition}
+
+终止执行的长度是一个自然数，直观上，它代表程序在实际情况下的一次运行所执行的步数（语句块的数量）。正如在引言中指出的，这可以作为一种上界指标，它对应于在程序的资源消耗模型中，任意语句的资源消耗恒为1的情况。我们可以姑且将其称为“长度上界”——不过，虽然它能准确地刻画程序的复杂度性质，却不利于进行验证。
+
+由于工作语言\tmtextbf{Imp}中无递归，在长度上界中起决定作用的其实是程序中循环的结构，而语句块的数量等只在常数意义上对其有所影响。基于此，我们在本文中采用的是循环上界（见定义\ref{def:chap2-loop-bound}）作为上界的定义，非形式化地来说，即程序的CFG表示中环路出现的次数。为此，下一节将从CFG的结构出发引入循环的概念。
+
+\section{循环}
+
+我们从有向图路径的角度给出自然循环的概念。在下述定义中，假设给定程序$P
+= (L, \tau, l_0, \tmop{Var}, \tmop{Var}_{\tmop{in}})$。
+
+\begin{definition}
+  设$a, b \in
+  L$是程序P中的两个位置，则$a$支配$b$，当且仅当$a$在所有从$l_0$到$b$的路径上。
+\end{definition}
+
+\begin{definition}
+  设$t = (l, \tmop{stmt}, l') \in \tau$是程序$P$中的一条边，则$t$是$P$中的一条回边（back edge），当且仅当$l'$支配$l$。此时称$l'$是P中的一个循环头（loop header），即位置$l'$是循环头当且仅当它是某条回边的目标位置。
+\end{definition}
+
+\begin{definition}
+  设$l$是$P$中的一个循环头，则$l$对应的自然循环（natural loop）是满足如下条件的一组位置$l'$的最大集合（maximal set）：
+  
+  \begin{enumerate}
+    \item $l$支配$l'$
+    
+    \item 存在从某个位置$l''$到$l$的一条回边，使得$l'$到$l''$有一条不经过l的路径
+  \end{enumerate}
+\end{definition}
+
+本篇论文中我们也将自然循环简称为循环。自然循环的定义表明，并非CFG中的所有环路都可作为循环，从而参与上界的计算。通常，自然循环对应于实际程序中的循环结构，如C语言中的三种循环在CFG中都是自然循环。自然循环的特点是只有一个循环头作为循环的入端，可能内部有嵌套循环与分支等。为了更准确地描述程序在一次执行中所经过的循环中的实际位置，我们引入循环路径的概念：
+
+\begin{definition}
+  循环路径（loop path）是程序中的一条简单环路\footnote{即除$l_1$外，路径中不存在重复的位置}$l_1 \rightarrow l_2 \rightarrow l_3 \rightarrow \cdots \rightarrow l_{n - 1} \rightarrow l_n = l_1$，满足$l_1$是循环头，且对任意$i \in [1, n]$，$l_i$都在$l_1$的自然循环中。
+\end{definition}
+
+循环路径代表一次具体的执行在循环中可能经过的简单路径模式(pattern)。图\ref{fig:chap2-cfg-complex}是一个由实际程序翻译而来的程序，按照定义可知，$l_2$，$l_3$和$l_4$都是循环头，它们分别对应于一个自然循环，每个自然循环有一条循环路径，如表\ref{tab:chap2-loop-path}所示。
+
+\begin{figure}
+    \centering
+    \begin{tikzpicture}[auto]
+    
+        \node[state, initial] (q1) {$l_{init}$};
+        \node[state, right of=q1] (q2) {$l_2$};
+        \node[state, right of=q2] (q3) {$l_3$};
+        \node[state, right of=q3] (q4) {$l_4$};
+        \node[state, below right of=q1] (q6) {$l_{end}$};
+        
+        \draw (q1) edge[above] node{$a = n; b = 0$} (q2)
+        (q2) edge[bend left, above] node[align=center]{$\mathbf{assume} \, a > 0;$ \\ $a = a - 1;$ \\ $b = b + 1$} (q3)
+        (q2) edge[below] node{$\mathbf{assume} \, a \leq 0$} (q6)
+        (q3) edge[bend left, below] node{$\mathbf{assume} \, b \leq 0$} (q2)
+        (q3) edge[bend left, above] node[align=center]{$\mathbf{assume}\, b > 0;$ \\ $b = b - 1$} (q4)
+        (q4) edge[bend left, below] node{$\mathbf{assume}\, b \leq 0$} (q3)
+        (q4) edge[loop below] node[align=center]{$\mathbf{assume}\, b > 0;$ \\ $b = b - 1$} (q4);
+        
+    \end{tikzpicture}
+    \caption{一个实际程序}
+    \label{fig:chap2-cfg-complex}
+\end{figure}
+
+\begin{table}
+  \centering
+  \begin{tabular}{lll}
+    \toprule
+    循环头 & 自然循环 & 循环路径\\
+    \midrule
+    $l_2$ & $\{l_2, l_3, l_4\}$ & $l_2 \rightarrow l_3 \rightarrow l_2$\\
+    $l_3$ & $\{l_3, l_4\}$ & $l_3 \rightarrow l_4 \rightarrow l_3$\\
+    $l_4$ & $\{l_4\}$ & $l_4 \rightarrow l_4$\\
+    \bottomrule
+  \end{tabular}
+  \caption{图\ref{fig:chap2-cfg-complex}中的自然循环与循环路径}
+  \label{tab:chap2-loop-path}
+\end{table}
+
+借助于循环路径的概念，可以很方便地从循环的角度对上界进行定义。下一节将引入本论文考虑和验证的主要对象——循环上界。
+
+\section{上界}
+
+这一节形式化地给出上界的定义。首先，我们需要说明何为循环路径的实例：
+
+\begin{definition}
+  令$\pi = l_1 \rightarrow l_2 \rightarrow \cdots \rightarrow l_{n - 1}
+  \rightarrow
+  l_1$是P中的一条循环路径，称路径v是$\pi$的一个实例，当且仅当v形如$l_1
+  \rightarrow l_2 \ast l_2 \rightarrow \cdots \rightarrow l_{n - 1} \ast l_{n
+  - 1} \rightarrow l_1$，其中，$l_i \ast
+  l_i$表示P中任意一条从$l_i$到$l_i$，且不经过$l_1$的路径。如果v是路径p的子路径，则称p中包含实例v。
+\end{definition}
+
+直观来说，一个循环路径的实例是循环路径这一模式在一条具体路径上的实例化，或泛化（generalization）。比如，图\ref{fig:chap2-cfg-complex}的CFG中，考虑路径$l_{init} \rightarrow l_2 \rightarrow l_3 \rightarrow l_4 \rightarrow l_4 \rightarrow l_3 \rightarrow l_2 \rightarrow l_3 \rightarrow l_2 \rightarrow l_{end}$，其中包含了如下几个循环路径的实例：
+
+\begin{enumerate}
+    \item $l_2 \rightarrow l_3 \rightarrow l_2$（路径$l_2 \rightarrow l_3 \rightarrow l_2$的实例）
+    \item $l_2 \rightarrow l_3 \rightarrow l_4 \rightarrow l_4 \rightarrow l_3 \rightarrow l_2 \rightarrow l_3 \rightarrow l_2$（路径$l_2 \rightarrow l_3 \rightarrow l_2$的实例）
+    \item $l_4 \rightarrow l_4$（路径$l_4 \rightarrow l_4$的实例）
+    \item $l_3 \rightarrow l_4 \rightarrow l_4 \rightarrow l_3$（路径$l_3 \rightarrow l_4 \rightarrow l_3$的实例）
+\end{enumerate}
+
+我们认为，如果在程序的一次执行中包含一个循环路径的实例，则可以视为相应循环的一次迭代。对任意一条循环路径，我们可以定义路径上界为一个关于输入参数的符号表达式，保证在任意情况下实例的出现数量都不超过之：
+
+\begin{definition}
+  设$\pi$是一条循环路径，则$\pi$在程序P中的路径上界（path bound）是一个$\tmop{Var}_{\tmop{in}}$上的算数表达式\footnote{终止的程序必然存在界，但不一定能用定义\ref{def:chap2-arith-expr}中定义的算数表达式类A来表示。实际上，如果把界看作是一个从输入参数到自然数的函数，它甚至不一定是可计算的。这里我们只考虑以\tmtextbf{Imp}中的简单算数表达式所能表达的上界，在下一章中提出的验证方法并不关心表达式的具体类型，因此也适用于其他类型的表达式，只要底层的安全属性检查器支持之。}$\varphi$，使得对P的所有执行$(l_0,
+  s_0) \rightarrow (l_1, s_1) \rightarrow \cdots$，路径$l_0 \rightarrow l_1
+  \rightarrow \cdots$所包含的$\pi$的实例的数量总是不超过$s_0
+  (\varphi)$。
+\end{definition}
+
+最后，我们给出自然循环的循环上界的定义：
+
+\begin{definition}
+  \label{def:chap2-loop-bound}
+  设$L_h$是程序P中的自然循环，l是其循环头，则$L_h$的（全局）循环上界(global loop bound)是一个$\tmop{Var}_{\tmop{in}}$上的算数表达式$\varphi$，使得对P的所有执行$(l_0, s_0) \rightarrow (l_1, s_1) \rightarrow \cdots$，路径$l_0 \rightarrow l_1 \rightarrow \cdots$中所包含的从l出发的所有循环路径的实例的和总是不超过$s_0 (\varphi)$。
+\end{definition}
+
+循环上界刻画了自然循环在程序中迭代的次数，这是一个全局意义下的概念，在后续的章节中我们将考虑嵌套循环情况下的循环的局部上界。最后，为了定义的完整性，对于一个程序P而言，我们可以类似地定义程序上界（program
+bound）为所有循环路径实例和的上界，但在验证时，我们将把粒度限制在循环这一级。在下一章中，我们将介绍如何以程序中各自然循环的（全局的或局部的）循环上界为基础来表示程序上界，以及它们之间存在的数量关系。
+
+\section{安全属性检查}
+
+\label{section:chap2-safety-check}
+
+引言部分已简述了安全属性的概念。但要形式化地定义什么是程序的规范，以及更进一步地，什么是安全属性，都需要大量的篇幅。受限于此，此处只简要说明在程序的CFG表示层面，安全属性的一种表示形式。
+
+我们已非形式化地指出，安全属性是这样一类属性：它规定了程序在运行时，不会进入某些非预期的状态。在实际的程序中，诸如非法调用函数的参数、数组下标越界等等的行为都会导致这样的非预期状态。但是，在定义\ref{def:chap2-program}中对程序的定义，只关心了其计算层面的行为，因此我们可以只关注于程序的功能正确性（functional
+correctness）。
+
+因此，我们为定义\ref{def:chap2-program}中的程序加入一个特殊的位置$l_{\tmop{err}}$，它代表的就是程序的“错误位置”。每一个错误位置$l_{\tmop{err}}$都对应于一个安全属性，代表“程序永远不会进入位置$l_{\tmop{err}}$”。在实际的程序中，通常通过断言（assertion）来引入对程序正确性的一种规定，如C语言中的assert宏。虽然只是选定了一个特殊的位置\footnote{因为如果程序中存在多个错误位置，可以通过简单的方法将其变换为惟一的错误位置，因此下文假设程序中可以有多个错误位置}，程序所有的功能正确性断言都可以转换为这种表示。比如，对于图\ref{fig:chap2-cfg-complex}中的程序，如果断言“程序一定不会终止”，则只需将代表程序终止的位置$l_{end}$视作错误位置；代码\ref{fig:chap2-cfg-assert}中的程序存在着一个断言语句，可以将其翻译为如下带有错误位置的表示：
+
+\begin{figure}
+  \begin{subfigure}[b]{.5\linewidth}
+    \begin{minted}{c}
+        int main() {
+            int x, y;
+        
+            x = 0;
+            y = nondet();
+            while (y) {
+                x = x + 1;
+                y = nondet();
+            }
+        
+            assert (x != -1);
+            return 0;
+        }
+    \end{minted}
+    \caption{带有功能正确性断言的C函数}
+  \end{subfigure}
+  \begin{subfigure}[b]{.5\linewidth}
+    \centering
+    \begin{tikzpicture}[auto]
+        \node[state, initial] (q1) {$l_{init}$};
+        \node[state, right of=q1] (q2) {$l_2$};
+        \node[state, right of=q2] (q3) {$l_3$};
+        \node[state, below left of=q2] (q4) {$l_4$};
+        \node[state, right of=q4] (q5) {$l_{err}$};
+        \node[state, below right of=q4] (q6) {$l_{end}$};
+        
+        \draw (q1) edge[bend left, above] node{$x = 0; \mathbf{havoc} \, y$} (q2)
+            (q2) edge[bend left, above] node{$\mathbf{assume} \, y \neq 0$} (q3)
+            (q3) edge[bend left, below] node{$x = x + 1; \mathbf{havoc}\, y$} (q2)
+            (q2) edge[bend right, above] node{$\mathbf{assume}\, y = 0$} (q4)
+            (q4) edge[bend left, above] node{$\mathbf{assume}\, x = -1$} (q5)
+            (q4) edge[bend right, above] node{$\mathbf{assume}\, x \neq -1$} (q6);
+    \end{tikzpicture}
+    \caption{CFG表示}
+  \end{subfigure}
+  \caption{带断言语句的实际程序，以及与之对应的程序CFG表示和错误位置}
+  \label{fig:chap2-cfg-assert}
+\end{figure}
+
+如何进行安全属性的检查并非本篇论文关注的内容，数十年来，已经有大量的研究致力于求解此问题，如\cite{heizmann_software_2013,bakhirkin_recurrent_2016}等。虽然安全属性检查在通常意义下是一个不可判定问题，目前已有很多在实际场景中得到广泛应用的检查器能够高效地求解此问题。我们假定存在一个可靠的（sound）安全属性检查器，第三章将给出在此基础上的上界验证算法，而第四章中将给出基于Ultimate安全属性检查器的具体实现。

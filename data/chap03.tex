@@ -1,0 +1,493 @@
+% !TeX root = ../main.tex
+
+\chapter{基于安全属性检查的上界验证}
+
+这一章将在抽象程序层面给出基于安全属性检查方法的循环上界验证算法。首先，我们将考察单一循环的上界，指出如何通过程序变换（program
+transformation）将循环上界的验证问题归约到安全属性检查问题。随后，我们提出局部上界的概念，用于表示嵌套循环结构中，内层循环相对于外层循环的迭代次数，以便于更加灵活地进行验证。最后，我们以自然循环之间的嵌套关系为基础，给出程序上界的一种离散表示，并结合循环上界的验证方法，给出程序上界的整体验证算法。
+
+\section{循环上界的验证}
+
+\label{section:chap3-global-verif}
+
+这一节考虑单一一个自然循环的上界验证问题。试将此问题表述如下：给定程序$P$，$P$的一个自然循环$L_h$，以及算数表达式$\varphi$，判定$\varphi$是否是$L_h$的循环上界。
+
+我们的基本思路如下：首先采用程序变换的方式，构建一个经过调整（instrumentation）的程序$I
+(P)$，使得$I
+(P)$能完全模拟P的行为，且$L_h$的所有循环路径实例的出现都被计数器记录。特别的，在程序$I\left(P\right)$中加入了一个错误位置$l_{\tmop{err}}$，当且仅当循环路径实例的出现次数超过了$\varphi
+(s_0)$时会进入此位置。之后，我们对程序$P'$调用安全属性检查器进行验证，如果验证通过则可以证明$\varphi$是原程序P的一个循环上界，验证不通过则可以证明$\varphi$不是原程序P的循环上界。
+
+形式化地，设程序$P = (L, \tau, l_0, \tmop{Var},
+\tmop{Var}_{\tmop{in}})$，表达式$\varphi$是关于$\tmop{Var}_{\tmop{in}}$的算数表达式，$L_h$代表以位置$l_h$为循环头的自然循环，$L'
+\subseteq
+L$是$L_h$中的位置集合，$\tau_{|L'}$是变迁关系在$L'$上的限制。则程序变换算法I将程序P变换为程序$I
+(P) = (L \cup \{ l_{\tmop{err}}, l_{\tmop{instr}}, l_0' \}, \tau', l_0',
+\tmop{Var} \cup \{ i \}, \tmop{Var}_{\tmop{in}})$，其中$i \nin
+\tmop{Var}$是一个新(fresh)的变量，$l_0' \nin
+L$是新的初始状态，而$\tau'$由如下的规则确定：
+\begin{itemize}
+  \item 对任意$(l, \tmop{stmt}, l') \in \tau$，如果$l \neq l_h \vee l'
+  \nin L'$，则$(l, \tmop{stmt}, l') \in \tau'$
+  
+  \item 对任意$(l, \tmop{stmt}, l') \in \tau$，如果$l = l_h \wedge l'
+  \in L'$，则$(l_{\tmop{instr}}, \tmop{stmt}', l') \in
+  \tau'$，其中$\tmop{stmt}' \assign \textbf{assume}\, i \, \geqslant 0
+  \, \textbf{;} \, \tmop{stmt}$
+  
+  \item $(l_h, i = i - 1, l_{\tmop{instr}}) \in \tau'$
+  
+  \item $(l_{\tmop{instr}}, \textbf{assume} \, i < 0, l_{\tmop{err}})
+  \in \tau'$
+  
+  \item $(l_0', i = \varphi, l_0) \in \tau'$
+\end{itemize}
+
+
+非形式化地说，算法I引入了一个计数器变量i，并在程序入口处将其初始化为待验证的上界表达式；此外，每当控制流进入循环$L_h$，计数器i都将递减。如果此时计数器的值变为负，则进入错误状态$l_{\tmop{err}}$，否则继续正常运行。
+
+图\ref{fig:global-instrumentation}形象地描述了算法I对程序的变换。
+
+\begin{figure}
+    \begin{subfigure}[b]{0.5\linewidth}
+        \begin{tikzpicture}
+            \node[state, initial] (q0) {$l_{init}$};
+            \node[state, right of=q0] (q1) {$l_{1}$};
+            \node[state, below left of=q1] (q2) {$l_2$};
+            \node[state, below right of=q1] (q3) {$l_n$};
+            
+            \path[->] 
+                (q0) edge[above] node{$stmt_0$} (q1)
+                (q1) edge[bend right, below] node{$stmt_1$} (q2)
+                (q2) edge[bend right, below] node{$\cdots$} (q3)
+                (q3) edge[bend right, below] node{$stmt_3$} (q1);
+        \end{tikzpicture}
+        \caption{原程序}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.5\linewidth}
+        \begin{tikzpicture}
+            \node[state, initial] (q0) {$l_{init}$};
+            \node[state, right of=q0] (q1) {$l_1$};
+            \node[state, below left of=q1] (q4) {$l_{instr}$};
+            \node[state, below right of=q4] (q2) {$l_2$};
+            \node[state, above right of=q2] (q3) {$l_n$};
+            \node[state, left of=q4, accepting] (q5) {$l_{err}$};
+            
+            \path[->] 
+                (q0) edge[right, above] node{$i = \varphi\,\mathbf{;}\,stmt_0$} (q1)
+                (q1) edge[bend right, below] node{$i = i - 1$} (q4)
+                (q4) edge[bend right, above] node{$\mathbf{assume}\, i < 0$} (q5)
+                (q4) edge[bend right, above] node{$\mathbf{assume}\, i \geq 0\, \mathbf{;}\, stmt_1$} (q2)
+                (q2) edge[bend right, below] node{$\cdots$} (q3)
+                (q3) edge[bend right, below] node{$stmt_3$} (q1);
+        \end{tikzpicture}
+        \caption{变换后的程序}
+    \end{subfigure}
+    \caption{验证全局上界采取的程序变换示意}
+    \label{fig:global-instrumentation}
+\end{figure}
+
+我们使用安全属性检查器对得到的新程序$I
+(P)$进行验证。安全属性检查器可能会返回三种可能的结果：正确、错误或未知，它们分别代表程序中的错误位置不会被访问，有可能被访问，以及检查器无法证明是何种情况。我们将检查器视为黑盒进行调用，并根据其返回的结果作出如下的宣称：
+
+\begin{lemma}
+  如果安全属性检查器对程序$I
+  (P)$返回“正确”，则$\varphi$是程序P中自然循环$L_h$的循环上界；如果返回“错误”，则$\varphi$不是$L_h$的循环上界。
+\end{lemma}
+
+\begin{proof}
+  
+  假设安全属性检查器返回“正确”，但$\varphi$不是$L_h$的循环上界，即存在P的执行$(l_0,
+  s_0) \rightarrow (l_1, s_1) \rightarrow
+  \cdots$，满足其中任意的位置都不是$l_{\tmop{err}}$，且$L_h$的循环路径实例出现次数大于$\varphi
+  (s_0)$。
+  
+  根据上述程序变换的过程，$(l_0', s_0) \rightarrow (l_0, s_0')
+  \rightarrow (l_1, s_1') \rightarrow \cdots$是程序$I
+  (P)$的执行，其中$s_0' = s_0 [i / \varphi]$，且对任意的$j
+  \geqslant 1$，如果$l_{j - 1} = l_h$且$l_{j -
+  1}$是路径中循环头$l_h$的第$k$次出现，则$s_j' = s_j [i /
+  \varphi - k]$，否则$s_j' = s_j [i / s_{j - 1}' (i)]$。
+  
+  因为$L_h$的循环路径实例出现次数大于$\varphi
+  (s_0)$，而每一次实例的出现都必然经过循环头$l_h$，则存在$j
+  \geqslant 1$使得$l_{j - 1} = l_h$且$l_{j -
+  1}$是路径中循环头$l_h$的第$\varphi (s_0) +
+  1$次出现，从而有$s_j' (i) = - 1$。
+  
+  由于$l_{j - 1} =
+  l_h$，而根据变换的过程，$l_h$的后继只有$l_{\tmop{instr}}$，此外程序的执行是最大序列，在$l_j$处根据定义\ref{def:chap2-semantics}中假设断言语句的语义，$\{
+  s_j' \} \textbf{assume} \, i \geqslant 0 \{ s_{j + 1}'
+  \}$不成立，但$\{ s_j' \} \textbf{assume} \, i < 0 \{ s'_j
+  \}$成立，因此必有$(l_j, s_j') \rightarrow (l_{\tmop{err}},
+  s_j')$，即错误位置被访问。这与安全属性检查器的结果矛盾。所以$\varphi$是$L_h$的循环上界。
+  
+  同理，可以证明当检查器返回“错误”时，$\varphi$不是$L_h$的循环上界。
+\end{proof}
+
+引理1说明安全属性检查器在经过调整的程序$I
+(P)$上给出的结果，与待验证的上界$\varphi$在原程序P中是否成立是一致的。算法\ref{alg:global-verif}给出了这一算法的伪代码。
+
+\renewcommand{\algorithmicrequire}{\textbf{输入：}\unskip}
+\renewcommand{\algorithmicensure}{\textbf{输出：}\unskip}
+\renewcommand{\algorithmiccomment}[1]{\hfill// #1}
+\begin{algorithm}
+  \caption{验证循环的全局上界}
+  \label{alg:global-verif}
+  %\small
+  \begin{algorithmic}
+    \REQUIRE 程序$P$，$P$中的自然循环$L_h$，上界表达式$\phi$
+    \ENSURE $\phi$是否是$L$的全局上界
+
+    \STATE $(L, \tau, l_0, Var, Var_{in}) \leftarrow P$
+    \STATE $Var' \leftarrow Var \cup \{i\}$ \COMMENT i是不在Var中的变量
+    \STATE $\tau' \leftarrow \{\}$
+    \STATE $l \leftarrow$ loop header of $L_h$
+    \STATE create new location $l_{err}, l_{instr}$ and $l_0'$
+    \STATE add $(l_0', l_0, i = \phi)$ to $\tau'$
+    \STATE add $(l, l_{instr}, i = i - 1)$ to $\tau'$
+    \STATE add $(l_{instr}, l_{err}, \mathbf{assume}\, i < 0)$ to $\tau'$
+    \FORALL{$(l_1, l_2, s) \in \tau$ where $l_1 = l$}
+        \STATE add $(l_{instr}, l_2, \mathbf{assume}\, i \geq 0\, \mathbf{;}\, s)$ to $\tau'$
+    \ENDFOR
+    \FORALL{$(l_1, l_2, s) \in \tau$ where $l_1 \neq l$}
+        \STATE add $(l_1, l_2, s)$ to $\tau'$ 
+    \ENDFOR
+    \STATE $P' \leftarrow (L, \tau', l_0', Var', Var_{in})$
+    
+    \STATE call safety checker on $P'$ \COMMENT{调用安全属性检查器}
+    \IF{safety check succeeded}
+        \RETURN \TRUE
+    \ELSIF{safety check failed}
+        \RETURN \FALSE
+    \ELSIF{safety check has no result}
+        \RETURN unknown
+    \ENDIF
+
+  \end{algorithmic}
+\end{algorithm}
+
+\section{嵌套循环局部上界的验证}
+
+这一节考虑一种特殊的情况，即在嵌套循环中，内层循环的上界应该如何验证。根据定义，一个循环的上界是其循环路径实例在全局意义下的出现次数的界。所谓全局意义，指的是在程序的一次执行中，将所有实例的出现次数一同进行计数，最终得到总和。实际程序中，嵌套循环是非常常见的结构。所谓嵌套，可以很简单地进行定义如下：外层循环$L_{\tmop{out}}$嵌套内层循环$L_{\tmop{inner}}$，当且仅当$L_{\tmop{inner}}$的循环头在自然循环$L_{\tmop{out}}$中。
+
+对于存在于嵌套中的内层循环，当然也可以通过上一节的方法验证上界，这种方法能较好地适用于内外循环关联不强的情况。比如，代码\ref{listing:chap3-indep-nested}中，函数fun有一个两层的循环，但它们并不会使用相同的变量。实际上，内层循环虽然语法上嵌套在外层循环之中，它们的语义却是相互独立的。内层循环的上界是$max(b, 0)$\footnote{这里max(a,b)是条件表达式$a>b\,?\,a:b$的简写，下文同。因为在本文的形式化中控制流都由流图表示，因此条件表达式不在定义\ref{def:chap2-arith-expr}中。实际实现支持此类表达式。}，与外层循环的迭代次数无关。
+
+\begin{listing}
+\begin{minted}
+[
+frame=lines,
+framesep=2mm,
+baselinestretch=1,
+fontsize=\footnotesize,
+linenos
+]{c}
+void fun(int a, int b) {
+    while (a >= 2) {
+        a = a - 1;
+        while (b > 0) {
+            b--;
+        }
+    }
+}
+\end{minted}
+\caption{一个含有相互独立的嵌套循环的C语言函数}
+\label{listing:chap3-indep-nested}
+\end{listing}   
+
+但是，更常见的是诸如代码\ref{listing:chap3-dep-nested}的程序。在这里，每当外层循环迭代一次，内层循环就随之迭代i次，故其总的迭代次数是$1
++ 2 + \ldots + n = \frac{n (n +
+1)}{2}$，这也是内层循环的上（确）界：
+
+\begin{listing}
+\begin{minted}
+[
+frame=lines,
+framesep=2mm,
+baselinestretch=1,
+fontsize=\footnotesize,
+linenos
+]{c}
+void fun(int n) {
+    for (int i = 1; i <= n; i++) {
+        int j = i;
+        while (j > 0) {
+            j--;
+        }
+    }
+}
+\end{minted}
+\caption{一个含有非独立的嵌套循环的C语言函数}
+\label{listing:chap3-dep-nested}
+\end{listing}
+
+在这里，我们实际上是通过考察在外层循环的两次迭代之间内层循环出现次数的上界来解决循环上界的问题。局部上界在很多情况下相对于全局的循环上界而言更加直观，也更容易由自动上界求解器或者人工计算得到，因此，支持局部上界的验证是有必要的。一旦算出程序中所有循环的全局或局部上界，我们可以通过简单的算数运算求得程序的上界，这将在下一节进行说明。这里，我们首先给出局部上界的形式化定义：
+
+\begin{definition}
+  设$L_{\tmop{outer}}$和$L_{\tmop{inner}}$是程序P中的自然循环，$l_{\tmop{outer}}$和$l_{\tmop{inner}}$是其循环头，则$L_{\tmop{inner}}$相对于$L_{\tmop{outer}}$的局部循环上界(local
+  loop
+  bound)是一个$\tmop{Var}_{\tmop{in}}$上的算数表达式$\varphi$，使得对P的所有执行$r
+  = (l_0, s_0) \rightarrow (l_1, s_1) \rightarrow \cdots$以及路径$l_0
+  \rightarrow l_1 \rightarrow
+  \cdots$中所包含的所有$L_{\tmop{outer}}$的循环路径实例$v =
+  l_{\tmop{outer}} \rightarrow l_1' \rightarrow l_2' \rightarrow \cdots
+  \rightarrow
+  l_{\tmop{outer}}$，路径v中$L_{\tmop{inner}}$的所有循环路径的实例的和总是不超过$s_{\tmop{outer}}
+  (\varphi)$，其中$(l_{\tmop{outer}},
+  s_{\tmop{outer}})$是r中v的起始位置对应的格局。
+\end{definition}
+
+我们可以类似地给出一种程序变换的方法，将局部上界的验证归约为安全属性的验证。设程序$P
+= (L, \tau, l_0, \tmop{Var},
+\tmop{Var}_{\tmop{in}})$，表达式$\varphi$是关于$\tmop{Var}_{\tmop{in}}$的算数表达式，$L_{\tmop{outer}}$是以位置$l_{\tmop{outer}}$为循环头的自然循环，$L_{\tmop{inner}}$是以位置$l_{\tmop{inner}}$为循环头的自然循环。则程序变换算法$I_{\tmop{nested}}$将程序P变换为程序$I_{\tmop{nested}}
+(P) = (L \cup \{ l_{\tmop{err}}, l_{\tmop{nested}}, l_{\tmop{instr}} \},
+\tau', l_0, \tmop{Var} \cup \{ i \}, \tmop{Var}_{\tmop{in}})$，其中$i \nin
+\tmop{Var}$是一个新的变量，$\tau'$由如下的规则确定：
+\begin{itemize}
+  \item 对任意$(l, \tmop{stmt}, l') \in \tau$，如果$l = l_{\tmop{inner}}
+  \wedge l' \in L_{\tmop{inner}}$，则$(l_{\tmop{instr}}, \tmop{stmt}', l')
+  \in \tau'$，其中$\tmop{stmt}' \assign \textbf{assume} \, i \,
+  \geqslant 0 \textbf{;} \, \tmop{stmt}$
+  
+  \item 对任意$(l, \tmop{stmt}, l') \in \tau$，如果$l = l_{\tmop{outer}}
+  \wedge l' \in L_{\tmop{outer}}$，则$(l_{\tmop{nested}}, \tmop{stmt},
+  l_{}') \in \tau'$
+  
+  \item 对其余$(l, \tmop{stmt}, l') \in \tau$有$(l, \tmop{stmt}, l') \in
+  \tau'$
+  
+  \item $(l_{\tmop{inner}}, i = i - 1, l_{\tmop{instr}}) \in \tau'$
+  
+  \item $(l_{\tmop{instr}}, \textbf{assume} \, i < 0, l_{\tmop{err}})
+  \in \tau'$
+  
+  \item $(l_{\tmop{outer}}, i = \varphi, l_{\tmop{nested}}) \in \tau'$
+\end{itemize}
+
+
+图\ref{fig:local-instrumentation}直观地描述了$I_{\tmop{nest}} (P)$的结构。
+
+\begin{figure}
+    \begin{subfigure}[b]{0.5\linewidth}
+        \begin{tikzpicture}
+            \node[state, initial] (q0) {$l_{init}$};
+            \node[state, right of=q0] (qo) {$l_{outer}$};
+            \node[state, below left of=qo] (q1) {$l_{inner}$};
+            \node[state, below left of=q1] (q2) {$l_2$};
+            \node[state, right of=q2] (q3) {$l_n$};
+            \node[state, right of=q1] (q4) {$l'$};
+            
+            \path[->] 
+                (q0) edge[above] node{$stmt_0$} (qo)
+                (qo) edge[bend right, above] node{$stmt_1$} (q1)
+                (q1) edge[bend right, below] node{$stmt_2$} (q2)
+                (q2) edge[bend right, below] node{$\cdots$} (q3)
+                (q3) edge[bend right, below] node{$stmt_3$} (q1)
+                (q1) edge[bend right, below] node{$\cdots$} (q4)
+                (q4) edge[bend right, above] node{$stmt_4$} (qo);
+        \end{tikzpicture}
+        \caption{原程序}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.5\linewidth}
+        \begin{tikzpicture}
+            \node[state, initial] (q0) {$l_{init}$};
+            \node[state, right of=q0] (qo) {$l_{outer}$};
+            \node[state, below left of=qo] (qn) {$l_{nested}$};
+            \node[state, below right of=qn] (q1) {$l_{inner}$};
+            \node[state, below left of=q1] (q4) {$l_{instr}$};
+            \node[state, below right of=q4] (q2) {$l_2$};
+            \node[state, above right of=q2] (q3) {$l_n$};
+            \node[state, left of=q4, accepting] (q5) {$l_{err}$};
+            \node[state, above right of=q1] (q6) {$l'$};
+            
+            \path[->] 
+                (q0) edge[above] node{$stmt_0$} (qo)
+                (qo) edge[bend right, above] node{$i = \varphi$} (qn)
+                (qn) edge[bend right, above] node{$stmt_1$} (q1)
+                (q1) edge[bend right, below] node{$i = i - 1$} (q4)
+                (q1) edge[bend right, below] node{$\cdots$} (q6)
+                (q6) edge[bend right, below] node{$stmt_4$} (qo)
+                (q4) edge[bend right, above] node{$\mathbf{assume}\, i < 0$} (q5)
+                (q4) edge[bend right, above] node{$\mathbf{assume}\, i \geq 0\, \mathbf{;}\, stmt_1$} (q2)
+                (q2) edge[bend right, below] node{$\cdots$} (q3)
+                (q3) edge[bend right, below] node{$stmt_3$} (q1);
+        \end{tikzpicture}
+        \caption{变换后的程序}
+    \end{subfigure}
+    \caption{验证局部上界采取的程序变换示意}
+    \label{fig:local-instrumentation}
+\end{figure}
+
+和\ref{section:chap3-global-verif}节中的做法类似，我们调用安全属性检查器对$I_{\tmop{nest}}
+(P)$进行检查。我们同样给出这一方法的可靠性证明：
+
+\begin{lemma}
+  如果安全属性检查器对程序$I_{\tmop{nested}}
+  (P)$返回“正确”，则$\varphi$是程序P中循环$L_{\tmop{inner}}$相对于$L_{\tmop{outer}}$的循环上界；如果返回“错误”，则$\varphi$不是循环$L_{\tmop{inner}}$相对于$L_{\tmop{outer}}$的循环上界。
+\end{lemma}
+
+\begin{proof}
+  
+  
+  假设安全属性检查器返回的结果是“正确”，即错误位置$l_{\tmop{err}}$不会被访问。如果$\varphi$不是循环$L_{\tmop{inner}}$相对于$L_{\tmop{outer}}$的循环上界，则存在$L_{\tmop{outer}}$的实例$v
+  = (l_{\tmop{outer}}, s_0) \rightarrow (l_1, s_1) \rightarrow (l_2, s_2)
+  \rightarrow \cdots \rightarrow (l_{\tmop{outer}},
+  s_n)$，使得$L_{\tmop{inner}}$的实例在其中的出现次数大于$s_0
+  (\varphi)$。
+  
+  由于$L_{\tmop{inner}}$嵌套于$L_{\tmop{outer}}$，$l_{\tmop{inner}}$在$L_{\tmop{outer}}$中，所以$l_{\tmop{outer}}$支配$l_{\tmop{inner}}$。根据程序变换$I_{\tmop{nested}}$的定义，$v'
+  = (l_{\tmop{outer}}, s_0) \rightarrow (l_{\tmop{nested}}, s_{\tmop{nested}})
+  \rightarrow (l_1, s_1') \rightarrow (l_2, s_2') \rightarrow \cdots
+  \rightarrow (l_{\tmop{outer}}, s_m')$是$I_{\tmop{nested}}
+  (P)$中的路径，其中$s_{\tmop{nested}} = s_0 [i / s_0
+  (\varphi)]$，且对任意的$j > 1$，如果$l_{j - 1} =
+  l_{\tmop{inner}}$且$l_{j -
+  1}$是路径v中循环头$l_{\tmop{inner}}$的第$k$次出现，则$s_j' =
+  s_j [i / s_0 (\varphi) - k]$，否则$s_j' = s_j [i / s_{j - 1}' (i)]$。
+  
+  和引理1的证明类似，我们可以证明，由于路径v中$L_{\tmop{inner}}$的实例数量大于$s_0
+  (\varphi)$，则必有第$s_0 (\varphi) +
+  1$次的出现，从而存在一个格局$(l_{\tmop{instr}}, s)$使得$s (i)
+  = - 1$；由于此时$\{ s \} \textbf{assume} \, i \, \geqslant 0 \{ s
+  \}$不成立，下一个格局必然是$(l_{\tmop{err}},
+  s)$。这与安全属性检查器的结果矛盾。因此，$\varphi$是循环$L_{\tmop{inner}}$相对于$L_{\tmop{outer}}$的循环上界。
+  
+  同理，可以证明当安全属性检查器返回“错误”时，$\varphi$不是循环$L_{\tmop{inner}}$相对于$L_{\tmop{outer}}$的循环上界。
+\end{proof}
+
+算法\ref{alg:local-verif}给出了嵌套循环的局部上界验证的伪代码：
+
+\begin{algorithm}[ht]
+  \caption{验证循环的局部上界}
+  \label{alg:local-verif}
+  %\small
+  \begin{algorithmic}
+    \REQUIRE 程序$P$，外层循环$L_o$，内层循环$L_i$上界表达式$\phi$
+    \ENSURE $\phi$是否是$L_i$相对于$L_o$的局部上界
+
+    \STATE $(L, \tau, l_0, Var, Var_{in}) \leftarrow P$
+    \STATE $Var' \leftarrow Var \cup \{i\}$ \COMMENT i是不在Var中的变量
+    \STATE $\tau' \leftarrow \{\}$
+    
+    \STATE $l_o \leftarrow$ loop header of $L_o$
+    \STATE $l_i \leftarrow$ loop header of $L_i$
+    
+    \STATE create new location $l_{err}, l_{instr}$ and $l_{nested}$
+    \STATE add $(l_o, l_{nested}, i = \phi)$ to $\tau'$
+    \STATE add $(l_i, l_{instr}, i = i - 1)$ to $\tau'$
+    \STATE add $(l_{instr}, l_{err}, \mathbf{assume}\, i < 0)$ to $\tau'$
+    \FORALL{$(l_1, l_2, s) \in \tau$ where $l_1 = l_i$}
+        \STATE add $(l_{instr}, l_2, \mathbf{assume}\, i \geq 0\, \mathbf{;}\, s)$ to $\tau'$
+    \ENDFOR
+    \FORALL{$(l_1, l_2, s) \in \tau$ where $l_1 = l_o$}
+        \STATE add $(l_{nested}, l_2, s)$ to $\tau'$
+    \ENDFOR
+    \FORALL{$(l_1, l_2, s) \in \tau$ where $l_1 \neq l_i$ and $l_1 \neq l_o$}
+        \STATE add $(l_1, l_2, s)$ to $\tau'$ 
+    \ENDFOR
+    \STATE $P' \leftarrow (L, \tau', l_0', Var', Var_{in})$
+    
+    \STATE call safety checker on $P'$ \COMMENT{调用安全属性检查器}
+    \IF{safety check succeeded}
+        \RETURN \TRUE
+    \ELSIF{safety check failed}
+        \RETURN \FALSE
+    \ELSIF{safety check has no result}
+        \RETURN unknown
+    \ENDIF
+
+  \end{algorithmic}
+\end{algorithm}
+
+\section{程序的上界证明结构及其验证}
+
+前两小节考察的是单一的自然循环，并分别给出了全局和局部意义下上界的验证算法。对于程序而言，我们关心其整体的上界。正如在上一章中指出的，如果以程序中所有循环路径实例出现的次数的和作为程序上界，
+粒度会过于粗糙，也无法直接用归约到安全属性检查问题的方法来解决。在这一节中，我们提出将程序中每个循环的上界进行组合，共同构成一个证明结构（proof
+structure\cite{gulwani_speed_2009}），证明结构经过运算可对应于一个程序的上界。我们给出一个简单的转换方法，最后结合上述单一循环的验证算法，给出证明结构的验证策略。
+
+证明结构的定义如下：
+
+\begin{definition}
+  \label{def:chap3-proof-structure}
+  令程序$P = (L, \tau, l_0, \tmop{Var},
+  \tmop{Var}_{\tmop{in}})$，设$\tmop{Loop}$是P中所有自然循环的集合，则P的证明结构是一个二元组$(B,
+  S)$，其中映射$B \in \tmop{Loop} \rightarrow
+  A$将循环映射为其上界，映射$S \in \tmop{Loop} \rightarrow
+  \tmop{Loop} \cup \{ \tmop{global}
+  \}$将循环映射为其所在的外层嵌套循环，或是一个特殊的符号“global”。此外，满足由S生成的有向图是无环的。
+\end{definition}
+
+证明结构实际上为程序中的每一个循环$L_h$给出了两份信息：$L_h$的上界，以及此上界的作用域（scope）。这里所说的作用域，类似于实际程序中变量的作用域，但不是表示生命周期，而是表示映射B给定的上界是相对于哪一个外层循环而言的。如果是给定的上界是全局的循环上界，我们用符号“global”进行表示。
+
+正如上界不是唯一的，程序的证明结构也不是唯一的，但是每一证明结构都对应于一个上界。可以通过如下的递归函数Bound计算每个循环的全局上界：
+
+\begin{equation}
+    Bound(L_h) = \left\{ \begin{array}{ll}
+       B(L_h) & S(L_h) = "global"\\
+       Bound(L_{nested}) \times B(L_h) & S(L_h) = L_{nested}
+     \end{array} \right.
+\end{equation}
+
+由于证明结构是无环的，上述递归函数Bound总是会终止。直观上，这对应于在实际程序中，循环的嵌套总是有限的。
+
+最后，程序P的上界即为：
+
+\begin{equation}
+\sum_{L_h \in Loop} Bound(L_h)
+\end{equation}
+
+这里，我们结合循环上界的验证算法提出证明结构的验证算法，算法\ref{alg:chap3-proof-structure}给出了其伪代码：和本章前两节的思路类似，对每个自然循环，我们通过程序变换引入一个计数器变量，并在作用域起始的位置将其初始化为假定的上界表达式；此外在循环内部插入赋值语句，使计数器递减，并在计数器变为负时进入错误位置。
+
+在下一章中，我们将介绍如何由用户的输入得到证明结构，以及在实际场景的策略与实现。
+
+\begin{algorithm}[ht]
+  \caption{证明结构的验证算法}
+  \label{alg:chap3-proof-structure}
+  \begin{algorithmic}
+    \REQUIRE 程序$P$，证明结构$(B, S)$
+    \ENSURE $(B, S)$是否成立
+
+    \STATE $(Loc, \tau, l_0, Var, Var_{in}) \leftarrow P$
+    \STATE $Var' \leftarrow Var$
+    \FORALL{natural loop $L$ in $P$}
+        \STATE add a fresh variable $i_L$ to $Var'$ \COMMENT{为每一个循环创建计数器变量}
+    \ENDFOR
+    
+    \STATE iter $\leftarrow$ the preorder iterator of all natural loops in $P$ 
+    \STATE $\tau' \leftarrow \{\}$
+    
+    \WHILE{iter.hasNext}
+        \STATE $L \leftarrow$ iter.next     \COMMENT{对所有自然循环按照嵌套关系进行前序遍历}
+        \STATE $l \leftarrow$ loop header of $L$
+        \STATE $stmt \leftarrow \{\}$ \COMMENT{下类似局部上界的程序变换方法}
+        \FORALL{natural loop $L'$ such that $S(L')=L$}
+            \STATE add $i_{L'} = B(L')$ to $stmt$
+        \ENDFOR
+        \STATE create new locations $l_{L, instr}$ and $l_{L, err}$
+        \STATE add $(l, l_{L, instr}, join(stmt))$ to $\tau'$
+        \STATE add $(l_{L, instr}, l_{L, err}, \mathbf{assume} \, i_L < 0)$ to $\tau'$
+        \FORALL{$(l_1, l_2, s) \in \tau$ where $l_1 = l$}
+            \STATE add $(l_{L, instr}, l_2, \mathbf{assume}\, i_L \geq 0\,\mathbf{;}\,s)$ to $\tau'$ 
+        \ENDFOR
+    \ENDWHILE
+    
+    \STATE $global \leftarrow \{\}$ \COMMENT{下类似全局上界的程序变换方法}
+    \FORALL{natural loop $L'$ such that $S(L')="global"$}
+        \STATE add $i_{L'} = B(L')$ to $global$
+    \ENDFOR
+    \FORALL{$(l_{init}, l', s) \in \tau$}
+        \STATE add $(l_{init}, l', join(global)\,\mathbf{;}\,s)$ to $\tau$
+    \ENDFOR
+    \FORALL{$(l_1, l_2, s) \in \tau$ where $l_1$ is not loop header and $l_1 \neq l_{init}$}
+        \STATE add $(l_1, l_2, s)$ to $\tau'$
+    \ENDFOR
+    \STATE $P' \leftarrow (L, \tau', l_0', Var', Var_{in})$
+    
+    \STATE call safety checker on $P'$ \COMMENT{调用安全属性检查器}
+    \IF{safety check succeeded}
+        \RETURN \TRUE
+    \ELSIF{safety check failed}
+        \RETURN \FALSE
+    \ELSIF{safety check has no result}
+        \RETURN unknown
+    \ENDIF
+  \end{algorithmic}
+\end{algorithm}
